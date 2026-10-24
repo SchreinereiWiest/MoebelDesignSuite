@@ -94,7 +94,7 @@ export async function processImage(job: Job<ImageProcessingJob>) {
       for (const label of tagLabels) {
         const tag = await transaction.tag.upsert({
           where: { slug: label.slug },
-          create: label,
+          create: { ...label, normalizedName: label.slug.replace(/-/g, " ") },
           update: { name: label.name, category: label.category },
         });
         await transaction.imageTag.upsert({

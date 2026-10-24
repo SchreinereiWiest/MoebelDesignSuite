@@ -11,9 +11,12 @@ import { Button } from '@/components/ui/button'
 import { listImages, listTags } from '@/lib/api'
 import { DESIGN_GROUPS } from '@/lib/design-options'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/features/auth/auth-context'
 import type { DesignTag, ImageSummary, ImageVisibility } from '@/types'
 
 export function LibraryPage() {
+  const { session } = useAuth()
+  const permissions = session!.permissions
   const [searchParams, setSearchParams] = useSearchParams()
   const [search, setSearch] = useState(searchParams.get('search') || '')
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set())
@@ -62,9 +65,15 @@ export function LibraryPage() {
   }, [])
 
   useEffect(() => {
-    void load()
+    let active = true
+    queueMicrotask(() => {
+      if (active) void load()
+    })
     window.addEventListener('images-changed', load)
-    return () => window.removeEventListener('images-changed', load)
+    return () => {
+      active = false
+      window.removeEventListener('images-changed', load)
+    }
   }, [load])
 
   useEffect(() => {
@@ -111,7 +120,7 @@ export function LibraryPage() {
           <h1 className="mt-1 font-display text-4xl sm:text-5xl">Ideen, die etwas auslösen.</h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">Durchsuche deine Sammlung, kombiniere Merkmale und merke Bilder für konkrete Konzepte vor.</p>
         </div>
-        <Button onClick={() => setUploadOpen(true)}><Plus className="size-4" />Inspiration hinzufügen</Button>
+        {permissions.uploadImages && <Button onClick={() => setUploadOpen(true)}><Plus className="size-4" />Inspiration hinzufügen</Button>}
       </div>
 
       <div className="mt-8 flex flex-wrap items-center gap-3 border-y border-border py-4">
@@ -139,8 +148,8 @@ export function LibraryPage() {
             <select className="field" value={visibility} onChange={(event) => { setVisibility(event.target.value as ImageVisibility | ''); setPage(1) }}>
               <option value="">Alle Freigaben</option>
               <option value="PRIVATE">Privat</option>
-              <option value="RESTRICTED">Beratung</option>
-              <option value="PUBLIC">Freigegeben</option>
+              {permissions.usePublicContent && <option value="RESTRICTED">Beratung</option>}
+              {permissions.usePublicContent && <option value="PUBLIC">Freigegeben</option>}
             </select>
           </div>
           {DESIGN_GROUPS.map((group, index) => (
@@ -187,11 +196,11 @@ export function LibraryPage() {
           ) : images.length ? (
             <div className={cn('grid gap-x-3 gap-y-8 sm:grid-cols-2 md:grid-cols-3', compact ? 'xl:grid-cols-5 2xl:grid-cols-6' : 'xl:grid-cols-4 2xl:grid-cols-5')}>
               {images.map((image) => (
-                <ImageCard key={image.id} image={image} compact={compact} onOpen={() => { setSelectedImage(image); setDetailOpen(true) }} onSave={() => { setSelectedImage(image); setSaveOpen(true) }} />
+                <ImageCard key={image.id} image={image} compact={compact} onOpen={() => { setSelectedImage(image); setDetailOpen(true) }} onSave={permissions.useMoodboards ? () => { setSelectedImage(image); setSaveOpen(true) } : undefined} />
               ))}
             </div>
           ) : (
-            <EmptyState icon={Images} title="Keine passenden Bilder" description="Passe die Filter an oder ergänze ein neues Inspirationsbild mit den gesuchten Merkmalen." action={<Button onClick={filterCount || currentSearch ? clearFilters : () => setUploadOpen(true)}>{filterCount || currentSearch ? 'Filter zurücksetzen' : 'Bild hochladen'}</Button>} />
+            <EmptyState icon={Images} title="Keine passenden Bilder" description="Passe die Filter an oder ergänze ein neues Inspirationsbild mit den gesuchten Merkmalen." action={filterCount || currentSearch ? <Button onClick={clearFilters}>Filter zurücksetzen</Button> : permissions.uploadImages ? <Button onClick={() => setUploadOpen(true)}>Bild hochladen</Button> : undefined} />
           )}
 
           {pages > 1 && (
@@ -204,9 +213,9 @@ export function LibraryPage() {
         </section>
       </div>
 
-      <UploadDialog open={uploadOpen} onOpenChange={setUploadOpen} onUploaded={load} />
+      {permissions.uploadImages && <UploadDialog open={uploadOpen} onOpenChange={setUploadOpen} onUploaded={load} />}
       <ImageDetailDialog image={selectedImage} open={detailOpen} onOpenChange={setDetailOpen} onChanged={load} />
-      <AddToMoodboardDialog image={selectedImage} open={saveOpen} onOpenChange={setSaveOpen} />
+      {permissions.useMoodboards && <AddToMoodboardDialog image={selectedImage} open={saveOpen} onOpenChange={setSaveOpen} />}
     </div>
   )
 }

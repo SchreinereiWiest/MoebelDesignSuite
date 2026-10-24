@@ -6,7 +6,7 @@ Grundgerüst für eine Bildbibliothek mit Sammlungen und frei positionierbaren M
 
 - React 19, TypeScript, Vite und Tailwind CSS 4
 - shadcn/ui-Struktur mit Radix UI, Lucide, React Hook Form und Zod
-- React Router mit vorbereitetem, aktuell noch nicht aktiviertem `ProtectedRoute`
+- React Router mit Carpenters-Anmeldung, geschützten Arbeitsbereichen und Rollenprüfung
 - dnd-kit für sortierbare Sammlungen
 - react-konva/Konva für die spätere freie Moodboard-Fläche
 - Express-API mit Helmet, CORS und validierten Umgebungsvariablen
@@ -25,13 +25,25 @@ Die Anwendung unter `/` enthält die vollständigen Arbeitsbereiche für den Ges
 - **Moodboards:** Sammlungen als Galerie oder frei positionierbare Pinnwand mit Größe, Drehung, Notizen und Bewertungen
 - **Kundenberatung:** gemeinsame Gefällt-/Gefällt-nicht-Bewertung und automatisch strukturiertes Designbriefing
 
-Eine Anmeldung ist aktuell bewusst noch nicht aktiviert. Der vorhandene `ProtectedRoute` bleibt als Grundlage für die spätere Login-Integration im Projekt erhalten.
+Die Anmeldung verwendet den bestehenden Carpenters-Identitätsdienst im privaten Docker-Netzwerk. Firma, Benutzer, aktive Mitgliedschaft und Rolle werden dadurch weiterhin aus der Carpenters-Benutzerdatenbank bezogen; Passwörter oder Carpenters-JWTs sind nie für JavaScript lesbar. Die Design Suite prüft zusätzlich eine eigene Lizenz mit der Produkt-ID `moebel-design-suite`.
+
+Rollen werden auch im Backend durchgesetzt:
+
+- `admin`: Upload/Bildverwaltung, Firmeneinstellungen, Lizenzaktivierung und Tag-Vorschläge
+- `manager`: Upload/Bildverwaltung und lesbare Lizenzinformationen
+- `user`: Nutzung von Explorer, Bibliothek und persönlichen Moodboards
+- `public`: vorbereitete Endkundenrolle; ausschließlich öffentlich freigegebene Bilder und Gestaltungsfunktionen
+
+Bildfreigaben sind mandantenbezogen: `PRIVATE` bleibt bei der Eigentümerfirma, `RESTRICTED` ist für andere Firmen sichtbar und `PUBLIC` später auch für öffentliche Endkunden. Für beide externen Stufen ist eine ausdrückliche Bestätigung der Bildrechte erforderlich.
+
+Der globale Tagkatalog speichert kanonische Tags und eindeutige Aliase. Tenant-Admins reichen neue Begriffe zunächst als Vorschlag ein; ähnliche Begriffe werden tenantübergreifend angezeigt. Nur konfigurierte globale Kuratoren können Vorschläge freigeben oder mit einem bestehenden Tag zusammenführen.
 
 Die API wurde dafür um folgende Bereiche erweitert:
 
 - `GET/PATCH/DELETE /api/images/:id` für Bilddetails und Verwaltung
 - Mehrfach-Tag-, Sichtbarkeits- und Ähnlichkeitsfilter auf `GET /api/images`
 - `GET /api/tags` für kategorisierte Merkmale und Trefferzahlen
+- `GET /api/tags/suggestions` und `POST /api/tags/proposals` für den globalen Tagabgleich
 - `GET/POST/PATCH/DELETE /api/collections` für Moodboards
 - `POST /api/collections/:id/items` sowie `PATCH/DELETE /api/collections/:id/items/:itemId` für Positionen, Notizen und Bewertungen
 
@@ -51,6 +63,20 @@ Danach in `.env` mindestens folgende Werte anpassen:
 - `CORS_ORIGIN` auf `https://<APP_HOST>`
 - `TRAEFIK_NETWORK`, `TRAEFIK_HTTP_ENTRYPOINT`, `TRAEFIK_ENTRYPOINT` und `TRAEFIK_CERT_RESOLVER` passend zur vorhandenen Traefik-Instanz
 - `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID` und `S3_SECRET_ACCESS_KEY` auf den vorgesehenen Garage-Bucket
+- `CARPENTERS_API_URL=http://backendjs:5000` für den internen Identitätsdienst
+- `LICENSE_SERVER_URL=http://licensing-api:5100` und `LICENSE_SERVER_API_KEY` passend zum Lizenzserver-Client
+- `SESSION_SECRET` mit mindestens 32 zufälligen Zeichen
+- optional `PUBLIC_LOGIN_KEY` mit mindestens 24 zufälligen Zeichen und `GLOBAL_TAG_CURATOR_USER_IDS`
+
+Die Dienste `backendjs`, `licensing-api` und die Suite-API müssen im externen Docker-Netzwerk `MoebelDesign` hängen. Der zentrale Lizenzdatensatz muss für dieselbe Carpenters-`tenantId` das Produkt `moebel-design-suite` enthalten. Die Module `public-content` und `moodboards` werden getrennt geprüft; eine Firma kann daher nur die Design Suite oder zusätzlich Carpenters Production lizenzieren.
+
+Ein öffentlicher Login-Link hat beispielsweise die Form:
+
+```text
+http://suite.localhost/login?publicKey=<PUBLIC_LOGIN_KEY>
+```
+
+Der Key wird einmalig serverseitig geprüft, gegen ein kurzlebiges HttpOnly-Cookie ausgetauscht und sofort aus der Browseradresse entfernt. Die separate öffentliche Benutzerdatenbank ist bewusst noch nicht angebunden; das Panel zeigt diesen Zustand entsprechend an.
 
 Das in `TRAEFIK_NETWORK` konfigurierte Docker-Netzwerk muss bereits existieren. Anschließend:
 

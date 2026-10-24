@@ -11,6 +11,7 @@ import { MoodboardCard } from '@/components/MoodboardCard'
 import { UploadDialog } from '@/components/UploadDialog'
 import { Button } from '@/components/ui/button'
 import { listCollections, listImages } from '@/lib/api'
+import { useAuth } from '@/features/auth/auth-context'
 import type { CollectionSummary, ImageSummary } from '@/types'
 
 type DashboardData = {
@@ -23,6 +24,8 @@ type DashboardData = {
 
 export function DashboardPage() {
   const navigate = useNavigate()
+  const { session } = useAuth()
+  const permissions = session!.permissions
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -37,8 +40,8 @@ export function DashboardPage() {
     try {
       const [images, publicImages, boards] = await Promise.all([
         listImages({ limit: 8 }),
-        listImages({ limit: 1, visibility: 'PUBLIC' }),
-        listCollections({ limit: 3 }),
+        permissions.usePublicContent ? listImages({ limit: 1, visibility: 'PUBLIC' }) : Promise.resolve({ data: [], total: 0, page: 1, limit: 1 }),
+        permissions.useMoodboards ? listCollections({ limit: 3 }) : Promise.resolve({ data: [], total: 0, page: 1, limit: 3 }),
       ])
       setData({
         images: images.data,
@@ -52,13 +55,17 @@ export function DashboardPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [permissions.useMoodboards, permissions.usePublicContent])
 
   useEffect(() => {
-    void load()
+    let active = true
+    queueMicrotask(() => {
+      if (active) void load()
+    })
     window.addEventListener('images-changed', load)
     window.addEventListener('collections-changed', load)
     return () => {
+      active = false
       window.removeEventListener('images-changed', load)
       window.removeEventListener('collections-changed', load)
     }
@@ -87,10 +94,10 @@ export function DashboardPage() {
                 Explorer starten
               </Link>
             </Button>
-            <Button className="h-11 border border-white/35 bg-white/10 px-5 text-white backdrop-blur hover:bg-white/20" onClick={() => setUploadOpen(true)}>
+            {permissions.uploadImages && <Button className="h-11 border border-white/35 bg-white/10 px-5 text-white backdrop-blur hover:bg-white/20" onClick={() => setUploadOpen(true)}>
               <ImagePlus className="size-4" />
               Eigene Inspiration
-            </Button>
+            </Button>}
           </div>
         </div>
       </section>
@@ -103,8 +110,8 @@ export function DashboardPage() {
 
       <section className="mt-5 grid gap-3 sm:grid-cols-3">
         <StatCard icon={Images} value={data?.imageTotal ?? 0} label="Inspirationen" hint="in deiner Bibliothek" />
-        <StatCard icon={LayoutDashboard} value={data?.boardTotal ?? 0} label="Moodboards" hint="aktive Konzepte" />
-        <StatCard icon={Sparkles} value={data?.publicTotal ?? 0} label="Freigegeben" hint="bereit zur Präsentation" />
+        {permissions.useMoodboards && <StatCard icon={LayoutDashboard} value={data?.boardTotal ?? 0} label="Moodboards" hint="aktive Konzepte" />}
+        {permissions.usePublicContent && <StatCard icon={Sparkles} value={data?.publicTotal ?? 0} label="Freigegeben" hint="bereit zur Präsentation" />}
       </section>
 
       <section className="mt-12">
@@ -125,10 +132,10 @@ export function DashboardPage() {
                   setSelectedImage(image)
                   setDetailOpen(true)
                 }}
-                onSave={() => {
+                onSave={permissions.useMoodboards ? () => {
                   setSelectedImage(image)
                   setSaveOpen(true)
-                }}
+                } : undefined}
               />
             ))}
           </div>
@@ -138,13 +145,13 @@ export function DashboardPage() {
               icon={Images}
               title="Deine Bibliothek wartet"
               description="Lade das erste Inspirationsbild hoch. Vorschauen und technische Merkmale werden automatisch erstellt."
-              action={<Button onClick={() => setUploadOpen(true)}><ImagePlus className="size-4" />Erstes Bild hochladen</Button>}
+              action={permissions.uploadImages ? <Button onClick={() => setUploadOpen(true)}><ImagePlus className="size-4" />Erstes Bild hochladen</Button> : undefined}
             />
           </div>
         )}
       </section>
 
-      <section className="mt-14">
+      {permissions.useMoodboards && <section className="mt-14">
         <SectionHeading
           eyebrow="Deine Konzepte"
           title="Aktuelle Moodboards"
@@ -163,11 +170,11 @@ export function DashboardPage() {
             <ArrowRight className="size-5" />
           </button>
         )}
-      </section>
+      </section>}
 
-      <UploadDialog open={uploadOpen} onOpenChange={setUploadOpen} onUploaded={load} />
+      {permissions.uploadImages && <UploadDialog open={uploadOpen} onOpenChange={setUploadOpen} onUploaded={load} />}
       <ImageDetailDialog image={selectedImage} open={detailOpen} onOpenChange={setDetailOpen} onChanged={load} />
-      <AddToMoodboardDialog image={selectedImage} open={saveOpen} onOpenChange={setSaveOpen} />
+      {permissions.useMoodboards && <AddToMoodboardDialog image={selectedImage} open={saveOpen} onOpenChange={setSaveOpen} />}
     </div>
   )
 }

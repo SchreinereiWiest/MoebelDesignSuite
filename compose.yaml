@@ -56,6 +56,7 @@ services:
     networks:
       - default
       - traefik
+      - MoebelDesign
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=${TRAEFIK_NETWORK:-carpenters-proxy}"
@@ -89,6 +90,9 @@ services:
     env_file: ${MDS_ENV_FILE:-.env}
     environment:
       NODE_ENV: production
+    networks:
+      - default
+      - traefik
     labels:
       - "traefik.enable=false"
     depends_on:
@@ -131,4 +135,7 @@ volumes:
 networks:
   traefik:
     name: ${TRAEFIK_NETWORK:-carpenters-proxy}
+    external: true
+  MoebelDesign:
+    name: MoebelDesign
     external: true

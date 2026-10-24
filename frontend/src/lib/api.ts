@@ -7,6 +7,11 @@ import type {
   ImageVisibility,
   MoodboardItem,
   TagCategory,
+  AuthSession,
+  SuiteLicense,
+  TenantSettings,
+  TagProposal,
+  TagSuggestion,
 } from '@/types'
 
 const apiBaseUrl = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
@@ -22,10 +27,21 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method || 'GET').toUpperCase()
+  const csrfToken = document.cookie
+    .split('; ')
+    .find((value) => value.startsWith('MDS-XSRF-TOKEN='))
+    ?.split('=')
+    .slice(1)
+    .join('=')
   const response = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
+    credentials: 'include',
     headers: {
       ...(init?.body ? { 'content-type': 'application/json' } : {}),
+      ...(!['GET', 'HEAD', 'OPTIONS'].includes(method) && csrfToken
+        ? { 'x-xsrf-token': decodeURIComponent(csrfToken) }
+        : {}),
       ...init?.headers,
     },
   })
@@ -36,6 +52,70 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (response.status === 204) return undefined as T
   return (await response.json()) as T
+}
+
+export function loginCompany(input: { company: string; login: string; password: string }) {
+  return request<AuthSession>('/auth/login', { method: 'POST', body: JSON.stringify(input) })
+}
+
+export function getCurrentSession() {
+  return request<AuthSession>('/auth/me')
+}
+
+export function logout() {
+  return request<void>('/auth/logout', { method: 'POST', body: JSON.stringify({}) })
+}
+
+export function getLoginMode() {
+  return request<{ mode: 'company' | 'public' }>('/auth/mode')
+}
+
+export function exchangePublicKey(key: string) {
+  return request<{ mode: 'public' }>('/auth/public-mode', { method: 'POST', body: JSON.stringify({ key }) })
+}
+
+export function loginPublic(input: { email: string; password: string }) {
+  return request<AuthSession>('/auth/public-login', { method: 'POST', body: JSON.stringify(input) })
+}
+
+export function getLicense(refresh = false) {
+  return request<{ license: SuiteLicense }>(`/license/current${refresh ? '?refresh=true' : ''}`)
+}
+
+export function activateLicense(licenseKey: string) {
+  return request<{ license: SuiteLicense }>('/license/current', {
+    method: 'PUT',
+    body: JSON.stringify({ licenseKey }),
+  })
+}
+
+export function getTenantSettings() {
+  return request<TenantSettings>('/settings/tenant')
+}
+
+export function updateTenantSettings(input: Pick<TenantSettings, 'libraryDensity' | 'defaultVisibility' | 'showExternalImages'>) {
+  return request<TenantSettings>('/settings/tenant', { method: 'PUT', body: JSON.stringify(input) })
+}
+
+export function getSettingsOverview() {
+  return request<{ images: number; sharedImages: number; tags: number; pendingTags: number }>('/settings/overview')
+}
+
+export function getTagSuggestions(search: string, category?: TagCategory) {
+  const query = new URLSearchParams({ search })
+  if (category) query.set('category', category)
+  return request<{ data: TagSuggestion[] }>(`/tags/suggestions?${query}`)
+}
+
+export function getTagProposals() {
+  return request<{ data: TagProposal[] }>('/tags/proposals')
+}
+
+export function proposeTag(input: { name: string; category: TagCategory }) {
+  return request<{ proposal: TagProposal; suggestions: TagSuggestion[] }>('/tags/proposals', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
 }
 
 export function listImages(input: {
@@ -68,6 +148,7 @@ export function updateImage(
     title?: string | null
     description?: string | null
     visibility?: ImageVisibility
+    rightsConfirmed?: boolean
     tags?: Array<{ name: string; category: TagCategory }>
   },
 ) {
@@ -87,6 +168,7 @@ export async function uploadImage(
     title?: string
     description?: string
     visibility: ImageVisibility
+    rightsConfirmed: boolean
     tags: Array<{ name: string; category: Exclude<TagCategory, 'TECHNICAL'> }>
   },
   onProgress?: (progress: number) => void,

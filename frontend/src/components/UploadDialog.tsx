@@ -28,6 +28,7 @@ export function UploadDialog({
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [visibility, setVisibility] = useState<ImageVisibility>('PRIVATE')
+  const [rightsConfirmed, setRightsConfirmed] = useState(false)
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set())
   const [dragging, setDragging] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -79,6 +80,7 @@ export function UploadDialog({
           title: title.trim(),
           description: description.trim(),
           visibility,
+          rightsConfirmed,
           tags: allOptions
             .filter((option) => selectedTags.has(option.slug))
             .map(({ name, category }) => ({ name, category })),
@@ -99,6 +101,7 @@ export function UploadDialog({
     setTitle('')
     setDescription('')
     setVisibility('PRIVATE')
+    setRightsConfirmed(false)
     setSelectedTags(new Set())
     setProgress(0)
     setPhase('idle')
@@ -187,12 +190,18 @@ export function UploadDialog({
                 <label>
                   <span className="field-label">Freigabe</span>
                   <select value={visibility} onChange={(event) => setVisibility(event.target.value as ImageVisibility)} className="field">
-                    <option value="PRIVATE">Privat – nur für mich</option>
-                    <option value="RESTRICTED">Beratung – intern nutzbar</option>
-                    <option value="PUBLIC">Freigegeben – präsentierbar</option>
+                    <option value="PRIVATE">Nur für die eigene Firma</option>
+                    <option value="RESTRICTED">Für andere Firmen freigeben</option>
+                    <option value="PUBLIC">Auch öffentlich freigeben</option>
                   </select>
                 </label>
               </div>
+              {visibility !== 'PRIVATE' && (
+                <label className="mt-4 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  <input type="checkbox" className="mt-0.5" checked={rightsConfirmed} onChange={(event) => setRightsConfirmed(event.target.checked)} />
+                  <span>Ich bestätige, dass meine Firma die erforderlichen Rechte besitzt und dieses Bild in der gewählten Stufe weitergeben darf.</span>
+                </label>
+              )}
               <label className="mt-5 block">
                 <span className="field-label">Notiz</span>
                 <textarea value={description} onChange={(event) => setDescription(event.target.value)} className="field min-h-20 resize-none" placeholder="Was gefällt dir an diesem Bild?" />
@@ -244,7 +253,7 @@ export function UploadDialog({
                 <Button type="button" variant="ghost" onClick={resetAndClose} disabled={phase === 'uploading'}>
                   Abbrechen
                 </Button>
-                <Button type="submit" disabled={!file || phase === 'uploading'}>
+                <Button type="submit" disabled={!file || phase === 'uploading' || (visibility !== 'PRIVATE' && !rightsConfirmed)}>
                   {phase === 'uploading' ? <LoaderCircle className="size-4 animate-spin" /> : <FileImage className="size-4" />}
                   {phase === 'uploading' ? 'Wird hochgeladen' : 'Bild hinzufügen'}
                 </Button>

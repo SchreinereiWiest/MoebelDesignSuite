@@ -33,9 +33,11 @@ export const collectionsRouter = Router();
 
 collectionsRouter.get("/", async (request, response) => {
   const query = listSchema.parse(request.query);
-  const where = query.search
-    ? { name: { contains: query.search, mode: "insensitive" as const } }
-    : {};
+  const owner = collectionOwner(request);
+  const where = {
+    ...owner,
+    ...(query.search ? { name: { contains: query.search, mode: "insensitive" as const } } : {}),
+  };
   const [total, collections] = await prisma.$transaction([
     prisma.collection.count({ where }),
     prisma.collection.findMany({
@@ -83,15 +85,20 @@ collectionsRouter.get("/", async (request, response) => {
 collectionsRouter.post("/", async (request, response) => {
   const input = collectionSchema.parse(request.body);
   const collection = await prisma.collection.create({
-    data: { name: input.name, description: input.description || null },
+    data: {
+      name: input.name,
+      description: input.description || null,
+      tenantId: request.auth!.user.tenant.id,
+      userId: request.auth!.user.id,
+    },
   });
   response.status(201).json(collection);
 });
 
 collectionsRouter.get("/:id", async (request, response) => {
   const { id } = idSchema.parse(request.params);
-  const collection = await prisma.collection.findUnique({
-    where: { id },
+  const collection = await prisma.collection.findFirst({
+    where: { id, ...collectionOwner(request) },
     include: {
       items: {
         orderBy: [{ zIndex: "asc" }, { sortOrder: "asc" }],
@@ -151,7 +158,7 @@ collectionsRouter.get("/:id", async (request, response) => {
 collectionsRouter.patch("/:id", async (request, response) => {
   const { id } = idSchema.parse(request.params);
   const input = collectionUpdateSchema.parse(request.body);
-  await ensureCollection(id);
+  await ensureCollection(id, request);
   const collection = await prisma.collection.update({
     where: { id },
     data: {
@@ -164,7 +171,7 @@ collectionsRouter.patch("/:id", async (request, response) => {
 
 collectionsRouter.delete("/:id", async (request, response) => {
   const { id } = idSchema.parse(request.params);
-  await ensureCollection(id);
+  await ensureCollection(id, request);
   await prisma.collection.delete({ where: { id } });
   response.status(204).send();
 });
@@ -172,8 +179,20 @@ collectionsRouter.delete("/:id", async (request, response) => {
 collectionsRouter.post("/:id/items", async (request, response) => {
   const { id } = idSchema.parse(request.params);
   const input = addItemSchema.parse(request.body);
-  await ensureCollection(id);
-  const image = await prisma.image.findUnique({ where: { id: input.imageId } });
+  await ensureCollection(id, request);
+  const image = await prisma.image.findFirst({
+    where: {
+      id: input.imageId,
+      ...(request.auth!.license?.features.includes("public-content")
+        ? {
+            OR: [
+              { ownerTenantId: request.auth!.user.tenant.id },
+              { visibility: { in: request.auth!.user.role === "public" ? ["PUBLIC"] : ["RESTRICTED", "PUBLIC"] } },
+            ],
+          }
+        : { ownerTenantId: request.auth!.user.tenant.id }),
+    },
+  });
   if (!image) {
     throw new AppError(404, "Bild nicht gefunden");
   }
@@ -205,6 +224,7 @@ collectionsRouter.post("/:id/items", async (request, response) => {
 collectionsRouter.patch("/:id/items/:itemId", async (request, response) => {
   const { id, itemId } = itemIdSchema.parse(request.params);
   const input = updateItemSchema.parse(request.body);
+  await ensureCollection(id, request);
   const item = await prisma.collectionItem.findFirst({ where: { id: itemId, collectionId: id } });
   if (!item) {
     throw new AppError(404, "Moodboard-Element nicht gefunden");
@@ -215,6 +235,7 @@ collectionsRouter.patch("/:id/items/:itemId", async (request, response) => {
 
 collectionsRouter.delete("/:id/items/:itemId", async (request, response) => {
   const { id, itemId } = itemIdSchema.parse(request.params);
+  await ensureCollection(id, request);
   const item = await prisma.collectionItem.findFirst({ where: { id: itemId, collectionId: id } });
   if (!item) {
     throw new AppError(404, "Moodboard-Element nicht gefunden");
@@ -223,9 +244,19 @@ collectionsRouter.delete("/:id/items/:itemId", async (request, response) => {
   response.status(204).send();
 });
 
-async function ensureCollection(id: string) {
-  const collection = await prisma.collection.findUnique({ where: { id }, select: { id: true } });
+async function ensureCollection(id: string, request: Express.Request) {
+  const collection = await prisma.collection.findFirst({
+    where: { id, ...collectionOwner(request) },
+    select: { id: true },
+  });
   if (!collection) {
     throw new AppError(404, "Moodboard nicht gefunden");
   }
+}
+
+function collectionOwner(request: Express.Request) {
+  return {
+    tenantId: request.auth!.user.tenant.id,
+    userId: request.auth!.user.id,
+  };
 }

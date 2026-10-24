@@ -7,6 +7,8 @@ import type { Prisma } from "../generated/prisma/client.ts";
 import { AppError } from "../lib/errors.js";
 import { createDownloadUrl, createUploadUrl, s3 } from "../lib/s3.js";
 import { enqueueImageProcessing } from "../queues/image-processing.js";
+import { requireLicenseFeature, requirePermission } from "../auth/middleware.js";
+import { normalizeTag } from "./tags.js";
 
 const supportedMimeTypes = [
   "image/avif",
@@ -22,6 +24,7 @@ const uploadSchema = z.object({
   title: z.string().trim().max(160).optional(),
   description: z.string().trim().max(2_000).optional(),
   visibility: z.enum(["PRIVATE", "RESTRICTED", "PUBLIC"]).default("PRIVATE"),
+  rightsConfirmed: z.boolean().default(false),
   tags: z
     .array(
       z.object({
@@ -50,6 +53,7 @@ const updateSchema = z.object({
   title: z.string().trim().max(160).nullable().optional(),
   description: z.string().trim().max(2_000).nullable().optional(),
   visibility: z.enum(["PRIVATE", "RESTRICTED", "PUBLIC"]).optional(),
+  rightsConfirmed: z.boolean().optional(),
   tags: z
     .array(
       z.object({
@@ -73,8 +77,11 @@ const idSchema = z.object({ id: z.string().uuid() });
 
 export const imagesRouter = Router();
 
-imagesRouter.post("/presign", async (request, response) => {
+imagesRouter.post("/presign", requireLicenseFeature("public-content"), requirePermission("uploadImages"), async (request, response) => {
   const input = uploadSchema.parse(request.body);
+  if (input.visibility !== "PRIVATE" && !input.rightsConfirmed) {
+    throw new AppError(400, "Für eine externe Freigabe müssen die Bildrechte bestätigt werden");
+  }
   const id = crypto.randomUUID();
   const safeFilename = sanitizeFilename(input.filename);
   const objectKey = `images/${id}/original/${safeFilename}`;
@@ -89,6 +96,10 @@ imagesRouter.post("/presign", async (request, response) => {
       mimeType: input.contentType,
       byteSize: BigInt(input.size),
       visibility: input.visibility,
+      ownerTenantId: request.auth!.user.tenant.id,
+      ownerUserId: request.auth!.user.id,
+      rightsConfirmedAt: input.rightsConfirmed ? new Date() : null,
+      rightsConfirmedBy: input.rightsConfirmed ? request.auth!.user.id : null,
     },
   });
 
@@ -109,9 +120,11 @@ imagesRouter.post("/presign", async (request, response) => {
   });
 });
 
-imagesRouter.post("/:id/complete", async (request, response) => {
+imagesRouter.post("/:id/complete", requireLicenseFeature("public-content"), requirePermission("uploadImages"), async (request, response) => {
   const { id } = idSchema.parse(request.params);
-  const image = await prisma.image.findUnique({ where: { id } });
+  const image = await prisma.image.findFirst({
+    where: { id, ownerTenantId: request.auth!.user.tenant.id },
+  });
 
   if (!image) {
     throw new AppError(404, "Bild nicht gefunden");
@@ -145,7 +158,7 @@ imagesRouter.post("/:id/complete", async (request, response) => {
 
 imagesRouter.get("/", async (request, response) => {
   const query = listSchema.parse(request.query);
-  const filters: Prisma.ImageWhereInput[] = [];
+  const filters: Prisma.ImageWhereInput[] = [imageAccessFilter(request.auth!)];
 
   if (query.search) {
     filters.push({
@@ -205,6 +218,9 @@ imagesRouter.get("/", async (request, response) => {
         height: image.height,
         status: image.status,
         visibility: image.visibility,
+        ownerTenantId: image.ownerTenantId,
+        isExternal: image.ownerTenantId !== request.auth!.user.tenant.id,
+        canManage: image.ownerTenantId === request.auth!.user.tenant.id && ["admin", "manager"].includes(request.auth!.user.role),
         createdAt: image.createdAt,
         tags: image.tags.map(({ tag }) => ({
           name: tag.name,
@@ -221,8 +237,8 @@ imagesRouter.get("/", async (request, response) => {
 
 imagesRouter.get("/:id", async (request, response) => {
   const { id } = idSchema.parse(request.params);
-  const image = await prisma.image.findUnique({
-    where: { id },
+  const image = await prisma.image.findFirst({
+    where: { id, ...imageAccessFilter(request.auth!) },
     include: { variants: true, tags: { include: { tag: true } } },
   });
 
@@ -244,6 +260,10 @@ imagesRouter.get("/:id", async (request, response) => {
     metadata: image.metadata,
     status: image.status,
     visibility: image.visibility,
+    ownerTenantId: image.ownerTenantId,
+    isExternal: image.ownerTenantId !== request.auth!.user.tenant.id,
+    canManage: image.ownerTenantId === request.auth!.user.tenant.id && ["admin", "manager"].includes(request.auth!.user.role),
+    rightsConfirmedAt: image.rightsConfirmedAt,
     createdAt: image.createdAt,
     updatedAt: image.updatedAt,
     tags: image.tags.map(({ tag }) => ({
@@ -256,13 +276,23 @@ imagesRouter.get("/:id", async (request, response) => {
   });
 });
 
-imagesRouter.patch("/:id", async (request, response) => {
+imagesRouter.patch("/:id", requirePermission("manageOwnTenantImages"), async (request, response) => {
   const { id } = idSchema.parse(request.params);
   const input = updateSchema.parse(request.body);
-  const existing = await prisma.image.findUnique({ where: { id } });
+  const existing = await prisma.image.findFirst({
+    where: { id, ownerTenantId: request.auth!.user.tenant.id },
+  });
 
   if (!existing) {
     throw new AppError(404, "Bild nicht gefunden");
+  }
+  const nextVisibility = input.visibility ?? existing.visibility;
+  if (nextVisibility !== "PRIVATE" && !request.auth!.license?.features.includes("public-content")) {
+    throw new AppError(403, "Öffentliche Inhalte sind in dieser Lizenz nicht freigeschaltet");
+  }
+  const hasRights = Boolean(existing.rightsConfirmedAt) || input.rightsConfirmed === true;
+  if (nextVisibility !== "PRIVATE" && !hasRights) {
+    throw new AppError(400, "Für eine externe Freigabe müssen die Bildrechte bestätigt werden");
   }
 
   await prisma.image.update({
@@ -271,6 +301,9 @@ imagesRouter.patch("/:id", async (request, response) => {
       ...(input.title !== undefined ? { title: input.title || null } : {}),
       ...(input.description !== undefined ? { description: input.description || null } : {}),
       ...(input.visibility ? { visibility: input.visibility } : {}),
+      ...(input.rightsConfirmed === true && !existing.rightsConfirmedAt
+        ? { rightsConfirmedAt: new Date(), rightsConfirmedBy: request.auth!.user.id }
+        : {}),
     },
   });
   if (input.tags) {
@@ -280,9 +313,12 @@ imagesRouter.patch("/:id", async (request, response) => {
   response.json({ id, updated: true });
 });
 
-imagesRouter.delete("/:id", async (request, response) => {
+imagesRouter.delete("/:id", requirePermission("manageOwnTenantImages"), async (request, response) => {
   const { id } = idSchema.parse(request.params);
-  const image = await prisma.image.findUnique({ where: { id }, include: { variants: true } });
+  const image = await prisma.image.findFirst({
+    where: { id, ownerTenantId: request.auth!.user.tenant.id },
+    include: { variants: true },
+  });
 
   if (!image) {
     throw new AppError(404, "Bild nicht gefunden");
@@ -305,7 +341,9 @@ imagesRouter.delete("/:id", async (request, response) => {
 
 imagesRouter.get("/:id/url", async (request, response) => {
   const { id } = idSchema.parse(request.params);
-  const image = await prisma.image.findUnique({ where: { id } });
+  const image = await prisma.image.findFirst({
+    where: { id, ...imageAccessFilter(request.auth!) },
+  });
 
   if (!image) {
     throw new AppError(404, "Bild nicht gefunden");
@@ -332,23 +370,32 @@ async function replaceImageTags(
   await prisma.$transaction(async (transaction) => {
     await transaction.imageTag.deleteMany({ where: { imageId } });
     for (const input of tags) {
-      const slug = slugify(input.name);
-      const tag = await transaction.tag.upsert({
-        where: { slug },
-        create: { name: input.name, slug, category: input.category },
-        update: { name: input.name, category: input.category },
+      const normalizedName = normalizeTag(input.name);
+      const tag = await transaction.tag.findFirst({
+        where: {
+          category: input.category,
+          OR: [
+            { normalizedName },
+            { aliases: { some: { normalizedName } } },
+          ],
+        },
       });
+      if (!tag) {
+        throw new AppError(400, `„${input.name}“ ist noch kein freigegebener globaler Tag`);
+      }
       await transaction.imageTag.create({ data: { imageId, tagId: tag.id } });
     }
   });
 }
 
-function slugify(value: string) {
-  return value
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
+function imageAccessFilter(auth: NonNullable<Express.Request["auth"]>): Prisma.ImageWhereInput {
+  const { user, license } = auth;
+  if (!license?.features.includes("public-content")) return { ownerTenantId: user.tenant.id };
+  if (user.role === "public") return { visibility: "PUBLIC" };
+  return {
+    OR: [
+      { ownerTenantId: user.tenant.id },
+      { visibility: { in: ["RESTRICTED", "PUBLIC"] } },
+    ],
+  };
 }

@@ -110,9 +110,9 @@ export const DESIGN_GROUPS: DesignGroup[] = [
 ]
 
 export const VISIBILITY_LABELS = {
-  PRIVATE: 'Privat',
-  RESTRICTED: 'Beratung',
-  PUBLIC: 'Freigegeben',
+  PRIVATE: 'Eigene Firma',
+  RESTRICTED: 'Firmenübergreifend',
+  PUBLIC: 'Öffentlich',
 } as const
 
 export const CATEGORY_LABELS: Record<TagCategory, string> = {

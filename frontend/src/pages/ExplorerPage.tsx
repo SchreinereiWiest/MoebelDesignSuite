@@ -9,9 +9,12 @@ import { Button } from '@/components/ui/button'
 import { listImages } from '@/lib/api'
 import { DESIGN_GROUPS } from '@/lib/design-options'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/features/auth/auth-context'
 import type { ImageSummary } from '@/types'
 
 export function ExplorerPage() {
+  const { session } = useAuth()
+  const canUseMoodboards = session!.permissions.useMoodboards
   const [step, setStep] = useState(0)
   const [selections, setSelections] = useState<Record<string, Set<string>>>(() =>
     Object.fromEntries(DESIGN_GROUPS.map((group) => [group.key, new Set<string>()])),
@@ -34,20 +37,23 @@ export function ExplorerPage() {
 
   useEffect(() => {
     const controller = new AbortController()
-    setLoading(true)
-    setError(null)
-    void listImages({ limit: 18, tags: selectedSlugs, match })
-      .then((response) => {
-        if (controller.signal.aborted) return
-        setImages(response.data)
-        setTotal(response.total)
-      })
-      .catch((caught: unknown) => {
-        if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : 'Ergebnisse konnten nicht geladen werden.')
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false)
-      })
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return
+      setLoading(true)
+      setError(null)
+      void listImages({ limit: 18, tags: selectedSlugs, match })
+        .then((response) => {
+          if (controller.signal.aborted) return
+          setImages(response.data)
+          setTotal(response.total)
+        })
+        .catch((caught: unknown) => {
+          if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : 'Ergebnisse konnten nicht geladen werden.')
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setLoading(false)
+        })
+    })
     return () => controller.abort()
   }, [match, selectedSlugs])
 
@@ -177,7 +183,7 @@ export function ExplorerPage() {
               <EmptyState icon={SlidersHorizontal} title="Ergebnisse nicht verfügbar" description={error} />
             ) : images.length ? (
               <div className="grid grid-cols-2 gap-x-3 gap-y-7 2xl:grid-cols-3">
-                {images.map((image) => <ImageCard key={image.id} image={image} compact onOpen={() => { setSelectedImage(image); setDetailOpen(true) }} onSave={() => { setSelectedImage(image); setSaveOpen(true) }} />)}
+                {images.map((image) => <ImageCard key={image.id} image={image} compact onOpen={() => { setSelectedImage(image); setDetailOpen(true) }} onSave={canUseMoodboards ? () => { setSelectedImage(image); setSaveOpen(true) } : undefined} />)}
               </div>
             ) : (
               <EmptyState icon={Compass} title="Noch keine exakte Inspiration" description="Wechsle zu „Ähnlich“, lockere einzelne Kriterien oder ergänze passende Bilder in der Bibliothek." />
@@ -187,7 +193,7 @@ export function ExplorerPage() {
       </div>
 
       <ImageDetailDialog image={selectedImage} open={detailOpen} onOpenChange={setDetailOpen} />
-      <AddToMoodboardDialog image={selectedImage} open={saveOpen} onOpenChange={setSaveOpen} />
+      {canUseMoodboards && <AddToMoodboardDialog image={selectedImage} open={saveOpen} onOpenChange={setSaveOpen} />}
     </div>
   )
 }

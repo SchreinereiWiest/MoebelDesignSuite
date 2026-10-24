@@ -43,6 +43,18 @@ enum ItemRating {
   DISLIKE
 }
 
+enum TagProposalStatus {
+  PENDING
+  APPROVED
+  MERGED
+  REJECTED
+}
+
+enum LibraryDensity {
+  COMFORTABLE
+  COMPACT
+}
+
 model Image {
   id              String           @id @default(uuid()) @db.Uuid
   objectKey       String           @unique @map("object_key")
@@ -56,6 +68,10 @@ model Image {
   metadata        Json?
   status          ImageStatus      @default(PENDING_UPLOAD)
   visibility      ImageVisibility  @default(PRIVATE)
+  ownerTenantId   String?          @map("owner_tenant_id") @db.Uuid
+  ownerUserId     String?          @map("owner_user_id") @db.Uuid
+  rightsConfirmedAt DateTime?      @map("rights_confirmed_at")
+  rightsConfirmedBy String?        @map("rights_confirmed_by") @db.Uuid
   errorMessage    String?          @map("error_message")
   createdAt       DateTime         @default(now()) @map("created_at")
   updatedAt       DateTime         @updatedAt @map("updated_at")
@@ -65,6 +81,7 @@ model Image {
 
   @@index([status])
   @@index([visibility])
+  @@index([ownerTenantId, visibility])
   @@index([createdAt])
   @@map("images")
 }
@@ -91,12 +108,48 @@ model Tag {
   id        String     @id @default(uuid()) @db.Uuid
   name      String     @unique
   slug      String     @unique
+  normalizedName String @unique @map("normalized_name")
   category  TagCategory @default(FEATURE)
   createdAt DateTime   @default(now()) @map("created_at")
   images    ImageTag[]
+  aliases   TagAlias[]
+  proposals TagProposal[] @relation("ResolvedTag")
 
   @@index([category])
   @@map("tags")
+}
+
+model TagAlias {
+  id             String   @id @default(uuid()) @db.Uuid
+  tagId          String   @map("tag_id") @db.Uuid
+  name           String
+  normalizedName String   @unique @map("normalized_name")
+  createdAt      DateTime @default(now()) @map("created_at")
+  tag            Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@index([tagId])
+  @@map("tag_aliases")
+}
+
+model TagProposal {
+  id             String            @id @default(uuid()) @db.Uuid
+  proposedName   String            @map("proposed_name")
+  normalizedName String            @map("normalized_name")
+  category       TagCategory
+  tenantId       String            @map("tenant_id") @db.Uuid
+  proposedBy     String            @map("proposed_by") @db.Uuid
+  status         TagProposalStatus @default(PENDING)
+  resolvedTagId  String?           @map("resolved_tag_id") @db.Uuid
+  decisionNote   String?           @map("decision_note")
+  resolvedBy     String?           @map("resolved_by") @db.Uuid
+  resolvedAt     DateTime?         @map("resolved_at")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+  resolvedTag    Tag?              @relation("ResolvedTag", fields: [resolvedTagId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status])
+  @@index([normalizedName])
+  @@map("tag_proposals")
 }
 
 model ImageTag {
@@ -115,12 +168,27 @@ model Collection {
   id          String           @id @default(uuid()) @db.Uuid
   name        String
   description String?
+  tenantId    String?            @map("tenant_id") @db.Uuid
+  userId      String?            @map("user_id") @db.Uuid
   createdAt   DateTime         @default(now()) @map("created_at")
   updatedAt   DateTime         @updatedAt @map("updated_at")
   items       CollectionItem[]
 
   @@index([createdAt])
+  @@index([tenantId, userId, updatedAt])
   @@map("collections")
+}
+
+model TenantSetting {
+  tenantId            String           @id @map("tenant_id") @db.Uuid
+  libraryDensity      LibraryDensity   @default(COMFORTABLE) @map("library_density")
+  defaultVisibility   ImageVisibility  @default(PRIVATE) @map("default_visibility")
+  showExternalImages  Boolean          @default(true) @map("show_external_images")
+  updatedBy           String?          @map("updated_by") @db.Uuid
+  createdAt           DateTime         @default(now()) @map("created_at")
+  updatedAt           DateTime         @updatedAt @map("updated_at")
+
+  @@map("tenant_settings")
 }
 
 model CollectionItem {

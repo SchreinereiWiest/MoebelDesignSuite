@@ -8,24 +8,31 @@ import {
   MessageSquareText,
   Search,
   Upload,
+  Settings,
 } from 'lucide-react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { UploadDialog } from '@/components/UploadDialog'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/features/auth/auth-context'
+import type { Permissions } from '@/types'
 
-const navigation = [
+const navigation: Array<{ label: string; to: string; icon: typeof Home; end?: boolean; requiredPermission?: keyof Permissions }> = [
   { label: 'Übersicht', to: '/', icon: Home, end: true },
   { label: 'Inspirationen', to: '/library', icon: Images },
   { label: 'Design Explorer', to: '/explorer', icon: Compass },
-  { label: 'Moodboards', to: '/moodboards', icon: LayoutDashboard },
-  { label: 'Kundenberatung', to: '/consultation', icon: MessageSquareText },
+  { label: 'Moodboards', to: '/moodboards', icon: LayoutDashboard, requiredPermission: 'useMoodboards' },
+  { label: 'Kundenberatung', to: '/consultation', icon: MessageSquareText, requiredPermission: 'useMoodboards' },
 ]
 
 export function AppShell() {
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [uploadOpen, setUploadOpen] = useState(false)
+  const { session } = useAuth()
+  const user = session!.user
+  const visibleNavigation = navigation.filter((item) => !item.requiredPermission || session!.permissions[item.requiredPermission])
+  const initials = (user.login || user.email).slice(0, 2).toUpperCase()
 
   function submitSearch(event: React.FormEvent) {
     event.preventDefault()
@@ -47,7 +54,7 @@ export function AppShell() {
 
         <nav className="mt-4 flex-1 space-y-1 px-4" aria-label="Hauptnavigation">
           <p className="mb-3 px-3 text-[0.64rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Arbeitsbereiche</p>
-          {navigation.map(({ label, to, icon: Icon, end }) => (
+          {visibleNavigation.map(({ label, to, icon: Icon, end }) => (
             <NavLink
               key={to}
               to={to}
@@ -72,13 +79,14 @@ export function AppShell() {
         </nav>
 
         <div className="p-4">
-          <div className="flex items-center gap-3 border-t border-border pt-4">
-            <span className="grid size-9 place-items-center rounded-full bg-[#394c40] text-xs font-semibold text-white">MW</span>
+          <NavLink to="/settings" className="group flex items-center gap-3 rounded-xl border-t border-border px-2 pt-4 transition hover:text-accent">
+            <span className="grid size-9 place-items-center rounded-full bg-[#394c40] text-xs font-semibold text-white">{initials}</span>
             <span className="min-w-0">
-              <span className="block truncate text-sm font-semibold">Wiest Werkstatt</span>
-              <span className="block truncate text-xs text-muted-foreground">Planung & Beratung</span>
+              <span className="block truncate text-sm font-semibold">{user.login}</span>
+              <span className="block truncate text-xs text-muted-foreground">{user.tenant.name} · {roleLabel(user.role)}</span>
             </span>
-          </div>
+            <Settings className="ml-auto size-4 text-muted-foreground transition group-hover:rotate-12" />
+          </NavLink>
         </div>
       </aside>
 
@@ -102,10 +110,15 @@ export function AppShell() {
             <Bell className="size-[1.1rem]" />
             <span className="absolute right-2 top-2 size-1.5 rounded-full bg-accent" />
           </button>
-          <Button onClick={() => setUploadOpen(true)} className="h-10 px-3 sm:px-4">
-            <Upload className="size-4" />
-            <span className="hidden sm:inline">Bild hochladen</span>
-          </Button>
+          {session?.permissions.uploadImages && (
+            <Button onClick={() => setUploadOpen(true)} className="h-10 px-3 sm:px-4">
+              <Upload className="size-4" />
+              <span className="hidden sm:inline">Bild hochladen</span>
+            </Button>
+          )}
+          <NavLink to="/settings" className="grid size-10 place-items-center rounded-full bg-card lg:hidden" aria-label="Benutzereinstellungen">
+            <span className="text-xs font-semibold">{initials}</span>
+          </NavLink>
         </header>
 
         <main className="min-h-[calc(100vh-5rem)] px-4 pb-28 pt-7 sm:px-6 lg:px-9 lg:pb-10 lg:pt-9">
@@ -114,7 +127,7 @@ export function AppShell() {
       </div>
 
       <nav className="fixed inset-x-3 bottom-3 z-40 flex h-16 items-center justify-around rounded-2xl border border-border bg-card/95 px-2 shadow-[0_16px_55px_rgba(32,28,23,0.18)] backdrop-blur lg:hidden" aria-label="Mobile Navigation">
-        {navigation.slice(0, 5).map(({ label, to, icon: Icon, end }) => (
+        {visibleNavigation.slice(0, 5).map(({ label, to, icon: Icon, end }) => (
           <NavLink
             key={to}
             to={to}
@@ -133,11 +146,17 @@ export function AppShell() {
         ))}
       </nav>
 
-      <UploadDialog
-        open={uploadOpen}
-        onOpenChange={setUploadOpen}
-        onUploaded={() => navigate('/library')}
-      />
+      {session?.permissions.uploadImages && (
+        <UploadDialog
+          open={uploadOpen}
+          onOpenChange={setUploadOpen}
+          onUploaded={() => navigate('/library')}
+        />
+      )}
     </div>
   )
+}
+
+function roleLabel(role: string) {
+  return ({ admin: 'Admin', manager: 'Manager', user: 'Benutzer', public: 'Öffentlich' } as Record<string, string>)[role] || role
 }
