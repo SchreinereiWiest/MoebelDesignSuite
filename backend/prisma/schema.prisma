@@ -1,0 +1,148 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "ts"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ImageStatus {
+  PENDING_UPLOAD
+  QUEUED
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum ImageVariantKind {
+  THUMBNAIL
+  PREVIEW
+}
+
+enum ImageVisibility {
+  PRIVATE
+  RESTRICTED
+  PUBLIC
+}
+
+enum TagCategory {
+  ROOM
+  FURNITURE
+  MATERIAL
+  COLOR
+  STYLE
+  FEATURE
+  TECHNICAL
+}
+
+enum ItemRating {
+  LIKE
+  DISLIKE
+}
+
+model Image {
+  id              String           @id @default(uuid()) @db.Uuid
+  objectKey       String           @unique @map("object_key")
+  originalName    String           @map("original_name")
+  title           String?
+  description     String?
+  mimeType        String           @map("mime_type")
+  byteSize        BigInt?          @map("byte_size")
+  width           Int?
+  height          Int?
+  metadata        Json?
+  status          ImageStatus      @default(PENDING_UPLOAD)
+  visibility      ImageVisibility  @default(PRIVATE)
+  errorMessage    String?          @map("error_message")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  variants        ImageVariant[]
+  tags            ImageTag[]
+  collectionItems CollectionItem[]
+
+  @@index([status])
+  @@index([visibility])
+  @@index([createdAt])
+  @@map("images")
+}
+
+model ImageVariant {
+  id        String           @id @default(uuid()) @db.Uuid
+  imageId   String           @map("image_id") @db.Uuid
+  kind      ImageVariantKind
+  objectKey String           @unique @map("object_key")
+  mimeType  String           @map("mime_type")
+  byteSize  BigInt           @map("byte_size")
+  width     Int
+  height    Int
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+  image     Image            @relation(fields: [imageId], references: [id], onDelete: Cascade)
+
+  @@unique([imageId, kind])
+  @@index([imageId])
+  @@map("image_variants")
+}
+
+model Tag {
+  id        String     @id @default(uuid()) @db.Uuid
+  name      String     @unique
+  slug      String     @unique
+  category  TagCategory @default(FEATURE)
+  createdAt DateTime   @default(now()) @map("created_at")
+  images    ImageTag[]
+
+  @@index([category])
+  @@map("tags")
+}
+
+model ImageTag {
+  imageId   String   @map("image_id") @db.Uuid
+  tagId     String   @map("tag_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  image     Image    @relation(fields: [imageId], references: [id], onDelete: Cascade)
+  tag       Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([imageId, tagId])
+  @@index([tagId])
+  @@map("image_tags")
+}
+
+model Collection {
+  id          String           @id @default(uuid()) @db.Uuid
+  name        String
+  description String?
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+  items       CollectionItem[]
+
+  @@index([createdAt])
+  @@map("collections")
+}
+
+model CollectionItem {
+  id           String     @id @default(uuid()) @db.Uuid
+  collectionId String     @map("collection_id") @db.Uuid
+  imageId      String     @map("image_id") @db.Uuid
+  sortOrder    Int        @default(0) @map("sort_order")
+  x            Float?
+  y            Float?
+  width        Float?
+  height       Float?
+  rotation     Float      @default(0)
+  zIndex       Int        @default(0) @map("z_index")
+  note         String?
+  rating       ItemRating?
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  image        Image      @relation(fields: [imageId], references: [id], onDelete: Cascade)
+
+  @@unique([collectionId, imageId])
+  @@index([collectionId, sortOrder])
+  @@index([imageId])
+  @@map("collection_items")
+}

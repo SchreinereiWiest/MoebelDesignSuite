@@ -1,0 +1,14 @@
+# Optional overlay for services on the existing Carpenters Docker network.
+# Usage: docker compose -f compose.yaml -f compose.external.yaml up -d --build migrate api worker frontend
+services:
+  migrate:
+    networks: [default, carpenters]
+  api:
+    networks: [default, traefik, carpenters]
+  worker:
+    networks: [default, carpenters]
+
+networks:
+  carpenters:
+    external: true
+    name: ${CARPENTERS_NETWORK}

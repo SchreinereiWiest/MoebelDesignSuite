@@ -1,0 +1,134 @@
+name: moebel-design-suite
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=false"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=false"
+    command: ["valkey-server", "--appendonly", "yes"]
+    volumes:
+      - valkey-data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    build:
+      context: ./backend
+      target: build
+    env_file: ${MDS_ENV_FILE:-.env}
+    command: ["npm", "run", "db:deploy"]
+    restart: on-failure:5
+    labels:
+      - "traefik.enable=false"
+
+  api:
+    build:
+      context: ./backend
+      target: runtime
+    restart: unless-stopped
+    env_file: ${MDS_ENV_FILE:-.env}
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+    expose:
+      - "3000"
+    networks:
+      - default
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_NETWORK:-carpenters-proxy}"
+      - "traefik.http.routers.moebel-design-suite-api.rule=Host(`${TRAEFIK_SUITE_HOST:-suite.localhost}`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.moebel-design-suite-api.entrypoints=${TRAEFIK_ENTRYPOINT:-web}"
+      - "traefik.http.routers.moebel-design-suite-api.priority=100"
+      - "traefik.http.routers.moebel-design-suite-api.service=moebel-design-suite-api"
+      - "traefik.http.services.moebel-design-suite-api.loadbalancer.server.port=3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  worker:
+    build:
+      context: ./backend
+      target: runtime
+    restart: unless-stopped
+    command: ["npm", "run", "start:worker"]
+    env_file: ${MDS_ENV_FILE:-.env}
+    environment:
+      NODE_ENV: production
+    labels:
+      - "traefik.enable=false"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  frontend:
+    build:
+      context: ./frontend
+      target: development
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      VITE_API_URL: ${VITE_API_URL:-/api}
+      VITE_DEV_API_PROXY: http://api:3000
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    expose:
+      - "5173"
+    networks:
+      - default
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_NETWORK:-carpenters-proxy}"
+      - "traefik.http.routers.moebel-design-suite.rule=Host(`${TRAEFIK_SUITE_HOST:-suite.localhost}`)"
+      - "traefik.http.routers.moebel-design-suite.entrypoints=${TRAEFIK_ENTRYPOINT:-web}"
+      - "traefik.http.routers.moebel-design-suite.service=moebel-design-suite"
+      - "traefik.http.services.moebel-design-suite.loadbalancer.server.port=5173"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  valkey-data:
+
+networks:
+  traefik:
+    name: ${TRAEFIK_NETWORK:-carpenters-proxy}
+    external: true
