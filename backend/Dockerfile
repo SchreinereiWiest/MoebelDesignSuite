@@ -46,10 +46,12 @@ RUN apt-get update \
 
 COPY package.json package-lock.json ./
 
-RUN npm ci --omit=dev \
+RUN npm ci \
     && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
+COPY prisma.config.ts ./
+COPY prisma ./prisma
 
 # Nur erforderlich, falls der generierte Prisma Client
 # außerhalb von dist liegt:

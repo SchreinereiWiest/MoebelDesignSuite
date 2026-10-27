@@ -63,6 +63,7 @@ model Image {
   description     String?
   mimeType        String           @map("mime_type")
   byteSize        BigInt?          @map("byte_size")
+  contentHash     String?          @map("content_hash") @db.VarChar(64)
   width           Int?
   height          Int?
   metadata        Json?
@@ -82,6 +83,7 @@ model Image {
   @@index([status])
   @@index([visibility])
   @@index([ownerTenantId, visibility])
+  @@index([ownerTenantId, contentHash])
   @@index([createdAt])
   @@map("images")
 }

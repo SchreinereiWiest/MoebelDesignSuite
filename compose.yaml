@@ -32,17 +32,7 @@ services:
       timeout: 3s
       retries: 10
 
-  migrate:
-    build:
-      context: ./backend
-      target: build
-    env_file: ${MDS_ENV_FILE:-.env}
-    command: ["npm", "run", "db:deploy"]
-    restart: on-failure:5
-    labels:
-      - "traefik.enable=false"
-
-  api:
+  backend:
     build:
       context: ./backend
       target: runtime
@@ -56,7 +46,7 @@ services:
     networks:
       - default
       - traefik
-      - MoebelDesign
+      - suite-moebel-design
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=${TRAEFIK_NETWORK:-carpenters-proxy}"
@@ -66,8 +56,10 @@ services:
       - "traefik.http.routers.moebel-design-suite-api.service=moebel-design-suite-api"
       - "traefik.http.services.moebel-design-suite-api.loadbalancer.server.port=3000"
     depends_on:
-      migrate:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
     healthcheck:
       test:
         [
@@ -96,8 +88,10 @@ services:
     labels:
       - "traefik.enable=false"
     depends_on:
-      migrate:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
 
   frontend:
     build:
@@ -107,7 +101,7 @@ services:
     environment:
       NODE_ENV: development
       VITE_API_URL: ${VITE_API_URL:-/api}
-      VITE_DEV_API_PROXY: http://api:3000
+      VITE_DEV_API_PROXY: http://backend:3000
       CHOKIDAR_USEPOLLING: "true"
     volumes:
       - ./frontend:/app
@@ -125,17 +119,19 @@ services:
       - "traefik.http.routers.moebel-design-suite.service=moebel-design-suite"
       - "traefik.http.services.moebel-design-suite.loadbalancer.server.port=5173"
     depends_on:
-      api:
+      backend:
         condition: service_healthy
 
 volumes:
   postgres-data:
+    name: moebel-design-suite_postgres-data
   valkey-data:
+    name: moebel-design-suite_valkey-data
 
 networks:
   traefik:
     name: ${TRAEFIK_NETWORK:-carpenters-proxy}
     external: true
-  MoebelDesign:
+  suite-moebel-design:
     name: MoebelDesign
     external: true

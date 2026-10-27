@@ -8,14 +8,29 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { env } from "../config/env.js";
 
-export const s3 = new S3Client({
-  endpoint: env.S3_ENDPOINT,
+const s3Config = {
   region: env.S3_REGION,
   forcePathStyle: env.S3_FORCE_PATH_STYLE,
   credentials: {
     accessKeyId: env.S3_ACCESS_KEY_ID,
     secretAccessKey: env.S3_SECRET_ACCESS_KEY,
   },
+};
+
+// Server-side traffic uses the Docker-internal endpoint. Presigned URLs must
+// instead contain a hostname that is resolvable by the user's browser.
+export const s3 = new S3Client({
+  ...s3Config,
+  endpoint: env.S3_ENDPOINT,
+});
+
+const s3Presigner = new S3Client({
+  ...s3Config,
+  endpoint: env.S3_PUBLIC_ENDPOINT ?? env.S3_ENDPOINT,
+  // A presigned browser upload has no body yet. The SDK's default CRC32 for
+  // an empty body would otherwise be embedded in the URL and rejected by
+  // Garage as soon as the browser sends the actual file contents.
+  requestChecksumCalculation: "WHEN_REQUIRED",
 });
 
 export async function ensureBucket() {
@@ -38,7 +53,7 @@ export function createUploadUrl(input: {
   contentType: string;
 }) {
   return getSignedUrl(
-    s3,
+    s3Presigner,
     new PutObjectCommand({
       Bucket: env.S3_BUCKET,
       Key: input.objectKey,
@@ -50,7 +65,7 @@ export function createUploadUrl(input: {
 
 export function createDownloadUrl(objectKey: string) {
   return getSignedUrl(
-    s3,
+    s3Presigner,
     new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: objectKey }),
     { expiresIn: env.S3_SIGNED_URL_TTL_SECONDS },
   );

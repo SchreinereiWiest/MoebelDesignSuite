@@ -13,7 +13,7 @@ Grundgerüst für eine Bildbibliothek mit Sammlungen und frei positionierbaren M
 - Prisma ORM 7.10.1 mit PostgreSQL-Treiberadapter und initialer Migration
 - privater Garage-S3-Speicher mit Presigned Upload-/Download-URLs
 - BullMQ auf Valkey für Sharp-Bildverarbeitung, WebP-Vorschauen und technische Tags
-- Docker Compose für Frontend, API, Worker, Migration, PostgreSQL und Valkey mit Traefik-Routing
+- Docker Compose für Frontend, Backend, Worker, PostgreSQL und Valkey mit Traefik-Routing
 
 ## Design Suite
 
@@ -47,7 +47,7 @@ Die API wurde dafür um folgende Bereiche erweitert:
 - `GET/POST/PATCH/DELETE /api/collections` für Moodboards
 - `POST /api/collections/:id/items` sowie `PATCH/DELETE /api/collections/:id/items/:itemId` für Positionen, Notizen und Bewertungen
 
-Vor dem ersten Start mit dem erweiterten Modell muss die neue Prisma-Migration eingespielt werden. Im Compose-Setup erledigt dies der `migrate`-Dienst automatisch.
+Vor dem ersten Start mit dem erweiterten Modell muss die neue Prisma-Migration manuell über den `backend`-Service eingespielt werden.
 
 ## Schnellstart mit lokalen Infrastruktur-Containern
 
@@ -62,7 +62,7 @@ Danach in `.env` mindestens folgende Werte anpassen:
 - `APP_HOST` auf die öffentliche Domain
 - `CORS_ORIGIN` auf `https://<APP_HOST>`
 - `TRAEFIK_NETWORK`, `TRAEFIK_HTTP_ENTRYPOINT`, `TRAEFIK_ENTRYPOINT` und `TRAEFIK_CERT_RESOLVER` passend zur vorhandenen Traefik-Instanz
-- `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID` und `S3_SECRET_ACCESS_KEY` auf den vorgesehenen Garage-Bucket
+- `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID` und `S3_SECRET_ACCESS_KEY` auf den vorgesehenen Garage-Bucket; `S3_ENDPOINT` ist intern erreichbar, `S3_PUBLIC_ENDPOINT` aus dem Browser
 - `CARPENTERS_API_URL=http://backendjs:5000` für den internen Identitätsdienst
 - `LICENSE_SERVER_URL=http://licensing-api:5100` und `LICENSE_SERVER_API_KEY` passend zum Lizenzserver-Client
 - `SESSION_SECRET` mit mindestens 32 zufälligen Zeichen
@@ -78,13 +78,14 @@ http://suite.localhost/login?publicKey=<PUBLIC_LOGIN_KEY>
 
 Der Key wird einmalig serverseitig geprüft, gegen ein kurzlebiges HttpOnly-Cookie ausgetauscht und sofort aus der Browseradresse entfernt. Die separate öffentliche Benutzerdatenbank ist bewusst noch nicht angebunden; das Panel zeigt diesen Zustand entsprechend an.
 
-Das in `TRAEFIK_NETWORK` konfigurierte Docker-Netzwerk muss bereits existieren. Anschließend:
+Das in `TRAEFIK_NETWORK` konfigurierte Docker-Netzwerk muss bereits existieren. Vor dem Start der Anwendung wird die Prisma-Migration einmalig über den Backend-Service ausgeführt:
 
 ```bash
+docker compose run --rm --build backend npm run db:deploy
 docker compose up --build
 ```
 
-Die Anwendung ist anschließend unter `https://<APP_HOST>` erreichbar. Traefik leitet `/api` direkt an den API-Container und alle anderen Pfade an das Frontend weiter; HTTP-Aufrufe werden dauerhaft auf HTTPS umgeleitet. API und Frontend veröffentlichen keine direkten Host-Ports. Der einmalige `migrate`-Container spielt vor API und Worker die Prisma-Migration ein.
+Die Anwendung ist anschließend unter `https://<APP_HOST>` erreichbar. Traefik leitet `/api` direkt an den Backend-Container und alle anderen Pfade an das Frontend weiter; HTTP-Aufrufe werden dauerhaft auf HTTPS umgeleitet. Backend und Frontend veröffentlichen keine direkten Host-Ports.
 
 Das Frontend läuft im Compose-Verbund im Vite-Entwicklungsmodus auf Port `5173`. `./frontend` wird nach `/app` gemountet, während die Container-Abhängigkeiten in einem separaten Volume unter `/app/node_modules` bleiben. Änderungen an React-, TypeScript- oder CSS-Dateien werden dadurch ohne Image-Neubau per Hot Module Replacement übernommen.
 
@@ -101,13 +102,15 @@ Der konfigurierte Certificate Resolver muss bereits in Traefik existieren. Traef
 Wenn die bestehenden Dienste über normale Hostnamen oder IPs erreichbar sind, genügen passende `DATABASE_URL`, `DIRECT_DATABASE_URL` und `VALKEY_URL` in `.env`. Starte dann nur die Anwendungsdienste:
 
 ```bash
-docker compose up -d --build migrate api worker frontend
+docker compose run --rm --build backend npm run db:deploy
+docker compose up -d --build backend worker frontend
 ```
 
 Werden PostgreSQL und Valkey nur über Containernamen in einem vorhandenen Docker-Netzwerk aufgelöst, `CARPENTERS_NETWORK` setzen und das Overlay verwenden:
 
 ```bash
-docker compose -f compose.yaml -f compose.external.yaml up -d --build migrate api worker frontend
+docker compose -f compose.yaml -f compose.external.yaml run --rm --build backend npm run db:deploy
+docker compose -f compose.yaml -f compose.external.yaml up -d --build backend worker frontend
 ```
 
 Für einen bestehenden PostgreSQL-Cluster sollte eine eigene Datenbank oder mindestens ein eigenes Schema samt eingeschränktem Benutzer angelegt werden. Zeigt `DATABASE_URL` auf PgBouncer, gehört die direkte Verbindung für Migrationen in `DIRECT_DATABASE_URL`.
@@ -122,7 +125,17 @@ Da der Browser direkt über Presigned URLs hochlädt, muss Garage CORS für die 
 - Request-Header: mindestens `Content-Type`
 - Origin: die reale Frontend-Domain, nicht pauschal `*` in Produktion
 
+Die API greift serverseitig über `S3_ENDPOINT` (zum Beispiel `http://garage:3900`) auf Garage zu. Für Presigned URLs verwendet sie `S3_PUBLIC_ENDPOINT` (zum Beispiel `http://storage.localhost`); dieser Hostname muss vom Browser erreichbar und über den Reverse Proxy auf dieselbe Garage-Instanz geroutet sein.
+
 In PostgreSQL werden ausschließlich Object Keys wie `images/<uuid>/original/<datei>` und `images/<uuid>/variants/thumbnail.webp` gespeichert. Kurzlebige URLs erzeugt die API erst bei Bedarf.
+
+### Bilderkatalog sichern und übertragen
+
+Firmenadministratoren können unter **Einstellungen → Bilddaten** den vollständigen Bilderkatalog als `.mds-backup.zip` exportieren. Das Archiv enthält ein versioniertes Manifest mit Titeln, Notizen, Tags und technischen Metadaten sowie jede Originaldatei genau einmal. Abgeleitete Vorschauvarianten werden nicht mitgesichert, sondern nach einem Import erneut erzeugt.
+
+Beim Import wird für jede Originaldatei eine SHA-256-Prüfsumme geprüft. Besitzt der Ziel-Tenant bereits ein Bild mit derselben Prüfsumme, wird es übersprungen. Dadurch kann dasselbe Archiv wiederholt eingespielt oder zur Katalogübertragung in einen anderen Tenant verwendet werden. Importierte Bilder starten immer mit der Sichtbarkeit `PRIVATE`; Freigabe- und Rechtebestätigungen des Quell-Tenants werden nicht übertragen. Nur bereits im Zielsystem freigegebene globale Tags werden verknüpft.
+
+Die Grenzwerte `MAX_BACKUP_BYTES` und `MAX_BACKUP_IMAGES` begrenzen Archivgröße und Bildanzahl. Export und Import arbeiten streamingbasiert, damit große Kataloge nicht vollständig im Arbeitsspeicher gehalten werden.
 
 ## Lokale Entwicklung ohne Docker für App-Prozesse
 

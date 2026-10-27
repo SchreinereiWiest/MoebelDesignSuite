@@ -1,12 +1,10 @@
 # Optional overlay for services on the existing Carpenters Docker network.
-# Usage: docker compose -f compose.yaml -f compose.external.yaml up -d --build migrate api worker frontend
+# Usage: docker compose -f compose.yaml -f compose.external.yaml up -d --build backend worker frontend
 services:
-  migrate:
-    networks: [default, carpenters]
-  api:
-    networks: [default, traefik, carpenters]
+  backend:
+    networks: [default, traefik, suite-moebel-design, carpenters]
   worker:
-    networks: [default, carpenters]
+    networks: [default, traefik, carpenters]
 
 networks:
   carpenters:

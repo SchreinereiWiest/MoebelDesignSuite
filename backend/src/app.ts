@@ -11,6 +11,7 @@ import { tagsRouter } from "./routes/tags.js";
 import { authRouter } from "./routes/auth.js";
 import { licenseRouter } from "./routes/license.js";
 import { settingsRouter } from "./routes/settings.js";
+import { backupsRouter } from "./routes/backups.js";
 import { requireActiveSuiteLicense, requireIdentity, requireLicenseFeature } from "./auth/middleware.js";
 import { verifyBrowserRequest } from "./auth/security.js";
 
@@ -38,6 +39,7 @@ app.use("/api/health", healthRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/license", requireIdentity, licenseRouter);
 app.use("/api/settings", requireIdentity, requireActiveSuiteLicense, settingsRouter);
+app.use("/api/backups", requireIdentity, requireActiveSuiteLicense, backupsRouter);
 app.use("/api/images", requireIdentity, requireActiveSuiteLicense, imagesRouter);
 app.use("/api/tags", requireIdentity, requireActiveSuiteLicense, tagsRouter);
 app.use("/api/collections", requireIdentity, requireActiveSuiteLicense, requireLicenseFeature("moodboards"), collectionsRouter);

@@ -1,5 +1,6 @@
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import type { Job } from "bullmq";
+import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { env } from "../config/env.js";
 import { prisma } from "../db/prisma.js";
@@ -33,6 +34,7 @@ export async function processImage(job: Job<ImageProcessingJob>) {
     }
 
     const sourceBuffer = Buffer.from(await sourceObject.Body.transformToByteArray());
+    const contentHash = createHash("sha256").update(sourceBuffer).digest("hex");
     const sourceMetadata = await sharp(sourceBuffer).metadata();
     const normalized = await sharp(sourceBuffer).rotate().toBuffer({ resolveWithObject: true });
 
@@ -110,6 +112,7 @@ export async function processImage(job: Job<ImageProcessingJob>) {
           width: normalized.info.width,
           height: normalized.info.height,
           byteSize: BigInt(sourceBuffer.byteLength),
+          contentHash,
           metadata: {
             format: sourceMetadata.format ?? null,
             space: sourceMetadata.space ?? null,

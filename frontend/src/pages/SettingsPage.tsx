@@ -1,17 +1,18 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { BadgeCheck, Building2, Database, ImageIcon, KeyRound, LoaderCircle, LogOut, Save, Settings2, ShieldCheck, Tags, UserRound } from 'lucide-react'
+import { Archive, BadgeCheck, Building2, Database, Download, ImageIcon, KeyRound, LoaderCircle, LogOut, Save, Settings2, ShieldCheck, Tags, Upload, UserRound } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/features/auth/auth-context'
-import { activateLicense, getSettingsOverview, getTagProposals, getTagSuggestions, getTenantSettings, proposeTag, updateTenantSettings } from '@/lib/api'
+import { activateLicense, getImageBackupExportUrl, getSettingsOverview, getTagProposals, getTagSuggestions, getTenantSettings, importImageBackup, proposeTag, resolveTagProposal, updateTenantSettings } from '@/lib/api'
 import { CATEGORY_LABELS } from '@/lib/design-options'
 import type { TagCategory, TagProposal, TagSuggestion, TenantSettings } from '@/types'
 
 const categoryOptions = Object.keys(CATEGORY_LABELS) as TagCategory[]
 
 export function SettingsPage() {
+  const backupInputRef = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
   const { session, logout, refresh } = useAuth()
   const [loggingOut, setLoggingOut] = useState(false)
@@ -25,6 +26,9 @@ export function SettingsPage() {
   const [tagCategory, setTagCategory] = useState<TagCategory>('FEATURE')
   const [suggestions, setSuggestions] = useState<TagSuggestion[]>([])
   const [saving, setSaving] = useState(false)
+  const [resolvingProposalId, setResolvingProposalId] = useState<string | null>(null)
+  const [backupImporting, setBackupImporting] = useState(false)
+  const [backupProgress, setBackupProgress] = useState(0)
 
   const canSeeManagement = Boolean(session?.permissions.viewLicense)
   const activeLicense = session?.license.status === 'active'
@@ -107,6 +111,47 @@ export function SettingsPage() {
     }
   }
 
+  async function approveProposal(proposal: TagProposal) {
+    setResolvingProposalId(proposal.id)
+    setMessage(null)
+    try {
+      await resolveTagProposal(proposal.id, { action: 'approve' })
+      const result = await getTagProposals()
+      setProposals(result.data)
+      setMessage(`Der Tag „${proposal.proposedName}“ wurde freigegeben.`)
+    } catch (caught) {
+      setMessage(caught instanceof Error ? caught.message : 'Tag-Vorschlag konnte nicht freigegeben werden.')
+    } finally {
+      setResolvingProposalId(null)
+    }
+  }
+
+  async function handleBackupImport(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    setBackupImporting(true)
+    setBackupProgress(0)
+    setMessage(null)
+    try {
+      const result = await importImageBackup(file, setBackupProgress)
+      setOverview(await getSettingsOverview())
+      window.dispatchEvent(new CustomEvent('images-changed'))
+      const skipped = result.skippedDuplicates
+        ? ` ${result.skippedDuplicates} bereits vorhandene Bilder wurden übersprungen.`
+        : ''
+      const missingTags = result.missingTagLinks
+        ? ` ${result.missingTagLinks} unbekannte Tag-Zuordnungen konnten nicht übernommen werden.`
+        : ''
+      setMessage(`${result.imported} Bilder aus „${result.sourceTenant.name}“ wurden importiert.${skipped}${missingTags}`)
+    } catch (caught) {
+      setMessage(caught instanceof Error ? caught.message : 'Das Bilder-Backup konnte nicht importiert werden.')
+    } finally {
+      setBackupImporting(false)
+      setBackupProgress(0)
+      event.target.value = ''
+    }
+  }
+
   return (
     <div className="mx-auto max-w-6xl">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -139,6 +184,7 @@ export function SettingsPage() {
           <Panel title="Angemeldeter Benutzer" icon={UserRound}>
             <dl className="grid gap-4 sm:grid-cols-2">
               <Data label="Benutzername" value={user.login} />
+              <Data label="Benutzer-ID" value={user.id} />
               <Data label="E-Mail-Adresse" value={user.email} />
               <Data label="Firma" value={user.tenant.name} />
               <Data label="Tenant-Slug" value={user.tenant.slug} />
@@ -195,6 +241,56 @@ export function SettingsPage() {
               </div>
             )}
           </Panel>
+          {permissions.manageCompanySettings && (
+            <Panel title="Bilderkatalog sichern & übertragen" icon={Archive}>
+              <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
+                Das Backup enthält alle Originalbilder dieser Firma sowie Titel, Notizen und Tag-Zuordnungen. Es kann in einer anderen Firma eingespielt werden; dort werden die Bilder aus Sicherheitsgründen zunächst privat angelegt.
+              </p>
+              <div className="mt-5 grid gap-4 md:grid-cols-2">
+                <div className="rounded-xl border border-border bg-muted/35 p-4">
+                  <p className="text-sm font-semibold">Katalog exportieren</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">Erstellt ein gestreamtes ZIP-Archiv. Vorschaubilder werden beim Import automatisch neu erzeugt.</p>
+                  <Button asChild variant="outline" className="mt-4">
+                    <a href={getImageBackupExportUrl()} download>
+                      <Download className="size-4" /> Backup herunterladen
+                    </a>
+                  </Button>
+                </div>
+                <div className="rounded-xl border border-border bg-muted/35 p-4">
+                  <p className="text-sm font-semibold">Katalog importieren</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">SHA-256-Prüfsummen verhindern doppelte Bilder im aktuellen Tenant. Bestehende Einträge bleiben unverändert.</p>
+                  <input
+                    ref={backupInputRef}
+                    type="file"
+                    accept=".zip,.mds-backup.zip,application/zip"
+                    className="sr-only"
+                    onChange={(event) => void handleBackupImport(event)}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="mt-4"
+                    onClick={() => backupInputRef.current?.click()}
+                    disabled={backupImporting}
+                  >
+                    {backupImporting ? <LoaderCircle className="size-4 animate-spin" /> : <Upload className="size-4" />}
+                    {backupImporting ? 'Backup wird geprüft' : 'Backup einspielen'}
+                  </Button>
+                  {backupImporting && (
+                    <div className="mt-4" aria-live="polite">
+                      <div className="mb-2 flex justify-between text-xs text-muted-foreground">
+                        <span>{backupProgress < 100 ? 'Archiv wird übertragen …' : 'Dateien werden geprüft und importiert …'}</span>
+                        <span>{backupProgress}%</span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                        <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${backupProgress}%` }} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Panel>
+          )}
         </TabsContent>
 
         <TabsContent value="tags" className="mt-6 space-y-5">
@@ -213,7 +309,33 @@ export function SettingsPage() {
             <div className="mt-5 flex justify-end"><Button onClick={() => void submitTag()} disabled={saving || tagName.trim().length < 2 || suggestions.some((item) => item.exact)}>Zur Prüfung einreichen</Button></div>
           </Panel>
           <Panel title="Tag-Vorschläge" icon={Database}>
-            <div className="divide-y divide-border">{proposals.length ? proposals.map((proposal) => <div key={proposal.id} className="flex items-center justify-between gap-4 py-3"><div><p className="text-sm font-semibold">{proposal.proposedName}</p><p className="mt-1 text-xs text-muted-foreground">{CATEGORY_LABELS[proposal.category]} · {new Intl.DateTimeFormat('de-DE').format(new Date(proposal.createdAt))}</p></div><span className="rounded-full bg-muted px-3 py-1.5 text-xs font-semibold">{proposalStatus(proposal.status)}</span></div>) : <p className="py-3 text-sm text-muted-foreground">Noch keine Vorschläge vorhanden.</p>}</div>
+            {permissions.curateGlobalTags && (
+              <p className="mb-3 text-xs text-muted-foreground">Als globaler Kurator siehst du Vorschläge aller Firmen und kannst offene Begriffe freigeben.</p>
+            )}
+            <div className="divide-y divide-border">
+              {proposals.length ? proposals.map((proposal) => (
+                <div key={proposal.id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold">{proposal.proposedName}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{CATEGORY_LABELS[proposal.category]} · {new Intl.DateTimeFormat('de-DE').format(new Date(proposal.createdAt))}</p>
+                  </div>
+                  <div className="flex items-center gap-2 self-start sm:self-auto">
+                    <span className="rounded-full bg-muted px-3 py-1.5 text-xs font-semibold">{proposalStatus(proposal.status)}</span>
+                    {permissions.curateGlobalTags && proposal.status === 'PENDING' && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => void approveProposal(proposal)}
+                        disabled={resolvingProposalId !== null}
+                      >
+                        {resolvingProposalId === proposal.id ? <LoaderCircle className="size-4 animate-spin" /> : <BadgeCheck className="size-4" />}
+                        Freigeben
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )) : <p className="py-3 text-sm text-muted-foreground">Noch keine Vorschläge vorhanden.</p>}
+            </div>
           </Panel>
         </TabsContent>
       </Tabs>

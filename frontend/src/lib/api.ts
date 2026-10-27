@@ -26,6 +26,14 @@ export class ApiError extends Error {
   }
 }
 
+export type BackupImportResult = {
+  imported: number
+  skippedDuplicates: number
+  missingTagLinks: number
+  total: number
+  sourceTenant: { id: string; name: string }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const method = (init?.method || 'GET').toUpperCase()
   const csrfToken = document.cookie
@@ -101,6 +109,46 @@ export function getSettingsOverview() {
   return request<{ images: number; sharedImages: number; tags: number; pendingTags: number }>('/settings/overview')
 }
 
+export function getImageBackupExportUrl() {
+  return `${apiBaseUrl}/backups/export`
+}
+
+export function importImageBackup(
+  file: File,
+  onProgress?: (progress: number) => void,
+) {
+  return new Promise<BackupImportResult>((resolve, reject) => {
+    const csrfToken = document.cookie
+      .split('; ')
+      .find((value) => value.startsWith('MDS-XSRF-TOKEN='))
+      ?.split('=')
+      .slice(1)
+      .join('=')
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${apiBaseUrl}/backups/import`)
+    xhr.withCredentials = true
+    xhr.setRequestHeader('content-type', 'application/zip')
+    if (csrfToken) xhr.setRequestHeader('x-xsrf-token', decodeURIComponent(csrfToken))
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100))
+    }
+    xhr.onerror = () => reject(new Error('Das Backup konnte nicht übertragen werden.'))
+    xhr.onload = () => {
+      const payload = (() => {
+        try { return JSON.parse(xhr.responseText) as BackupImportResult & { error?: string } }
+        catch { return null }
+      })()
+      if (xhr.status >= 200 && xhr.status < 300 && payload) {
+        onProgress?.(100)
+        resolve(payload)
+      } else {
+        reject(new ApiError(payload?.error || `Backup-Import fehlgeschlagen (${xhr.status})`, xhr.status))
+      }
+    }
+    xhr.send(file)
+  })
+}
+
 export function getTagSuggestions(search: string, category?: TagCategory) {
   const query = new URLSearchParams({ search })
   if (category) query.set('category', category)
@@ -113,6 +161,19 @@ export function getTagProposals() {
 
 export function proposeTag(input: { name: string; category: TagCategory }) {
   return request<{ proposal: TagProposal; suggestions: TagSuggestion[] }>('/tags/proposals', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export function resolveTagProposal(
+  id: string,
+  input:
+    | { action: 'approve'; decisionNote?: string }
+    | { action: 'reject'; decisionNote: string }
+    | { action: 'merge'; targetTagId: string; decisionNote?: string },
+) {
+  return request<TagProposal>(`/tags/proposals/${id}/resolve`, {
     method: 'POST',
     body: JSON.stringify(input),
   })
