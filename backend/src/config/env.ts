@@ -27,7 +27,7 @@ const envSchema = z.object({
   MAX_BACKUP_BYTES: z.coerce.number().int().positive().default(53_687_091_200),
   MAX_BACKUP_IMAGES: z.coerce.number().int().positive().max(100_000).default(25_000),
   WORKER_CONCURRENCY: z.coerce.number().int().positive().max(16).default(2),
-  CARPENTERS_API_URL: z.string().url().default("http://backendjs:5000"),
+  CARPENTERS_API_URL: z.string().url().default("http://carpenters-backend:5000"),
   LICENSE_SERVER_URL: z.string().url().default("http://licensing-api:5100"),
   LICENSE_SERVER_API_KEY: z.string().min(16).optional(),
   LICENSE_SERVER_PRODUCT_ID: z.string().min(1).default("moebel-design-suite"),

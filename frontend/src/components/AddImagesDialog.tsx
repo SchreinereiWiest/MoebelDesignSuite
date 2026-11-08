@@ -26,6 +26,8 @@ export function AddImagesDialog({
 
   useEffect(() => {
     if (!open) return
+    // The dialog lifecycle intentionally resets its request state before fetching external data.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
     setError(null)
     void listImages({ limit: 100, search })

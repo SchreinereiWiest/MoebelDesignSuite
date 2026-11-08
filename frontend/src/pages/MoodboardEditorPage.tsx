@@ -77,6 +77,8 @@ export function MoodboardEditorPage() {
   }, [id])
 
   useEffect(() => {
+    // Loading is the external API synchronization owned by this effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load()
   }, [load])
 

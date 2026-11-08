@@ -32,6 +32,8 @@ export function MoodboardsPage() {
   }, [activeSearch])
 
   useEffect(() => {
+    // Loading is the external API synchronization owned by this effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load()
     window.addEventListener('collections-changed', load)
     return () => window.removeEventListener('collections-changed', load)

@@ -63,12 +63,12 @@ Danach in `.env` mindestens folgende Werte anpassen:
 - `CORS_ORIGIN` auf `https://<APP_HOST>`
 - `TRAEFIK_NETWORK`, `TRAEFIK_HTTP_ENTRYPOINT`, `TRAEFIK_ENTRYPOINT` und `TRAEFIK_CERT_RESOLVER` passend zur vorhandenen Traefik-Instanz
 - `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID` und `S3_SECRET_ACCESS_KEY` auf den vorgesehenen Garage-Bucket; `S3_ENDPOINT` ist intern erreichbar, `S3_PUBLIC_ENDPOINT` aus dem Browser
-- `CARPENTERS_API_URL=http://backendjs:5000` für den internen Identitätsdienst
+- `CARPENTERS_API_URL=http://carpenters-backend:5000` für den internen Identitätsdienst
 - `LICENSE_SERVER_URL=http://licensing-api:5100` und `LICENSE_SERVER_API_KEY` passend zum Lizenzserver-Client
 - `SESSION_SECRET` mit mindestens 32 zufälligen Zeichen
 - optional `PUBLIC_LOGIN_KEY` mit mindestens 24 zufälligen Zeichen und `GLOBAL_TAG_CURATOR_USER_IDS`
 
-Die Dienste `backendjs`, `licensing-api` und die Suite-API müssen im externen Docker-Netzwerk `MoebelDesign` hängen. Der zentrale Lizenzdatensatz muss für dieselbe Carpenters-`tenantId` das Produkt `moebel-design-suite` enthalten. Die Module `public-content` und `moodboards` werden getrennt geprüft; eine Firma kann daher nur die Design Suite oder zusätzlich Carpenters Production lizenzieren.
+Die Dienste `carpenters-backend`, `licensing-api` und die Suite-API müssen im externen Docker-Netzwerk `MoebelDesign` hängen. Der zentrale Lizenzdatensatz muss für dieselbe Carpenters-`tenantId` das Produkt `moebel-design-suite` enthalten. Die Module `public-content` und `moodboards` werden getrennt geprüft; eine Firma kann daher nur die Design Suite oder zusätzlich Carpenters Production lizenzieren.
 
 Ein öffentlicher Login-Link hat beispielsweise die Form:
 

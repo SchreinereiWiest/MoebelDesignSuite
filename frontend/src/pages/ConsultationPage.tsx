@@ -54,6 +54,8 @@ export function ConsultationPage() {
   }, [selectedBoardId])
 
   useEffect(() => {
+    // Loading is the external API synchronization owned by this effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadBoard()
   }, [loadBoard])
 

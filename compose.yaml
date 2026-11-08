@@ -1,7 +1,7 @@
 name: moebel-design-suite
 
 services:
-  postgres:
+  design-postgres:
     image: postgres:17-alpine
     restart: unless-stopped
     labels:
@@ -18,7 +18,7 @@ services:
       timeout: 5s
       retries: 10
 
-  valkey:
+  design-valkey:
     image: valkey/valkey:8-alpine
     restart: unless-stopped
     labels:
@@ -32,7 +32,7 @@ services:
       timeout: 3s
       retries: 10
 
-  backend:
+  design-backend:
     build:
       context: ./backend
       target: runtime
@@ -56,9 +56,9 @@ services:
       - "traefik.http.routers.moebel-design-suite-api.service=moebel-design-suite-api"
       - "traefik.http.services.moebel-design-suite-api.loadbalancer.server.port=3000"
     depends_on:
-      postgres:
+      design-postgres:
         condition: service_healthy
-      valkey:
+      design-valkey:
         condition: service_healthy
     healthcheck:
       test:
@@ -73,7 +73,7 @@ services:
       retries: 5
       start_period: 15s
 
-  worker:
+  design-worker:
     build:
       context: ./backend
       target: runtime
@@ -88,12 +88,12 @@ services:
     labels:
       - "traefik.enable=false"
     depends_on:
-      postgres:
+      design-postgres:
         condition: service_healthy
-      valkey:
+      design-valkey:
         condition: service_healthy
 
-  frontend:
+  design-frontend:
     build:
       context: ./frontend
       target: development
@@ -101,7 +101,7 @@ services:
     environment:
       NODE_ENV: development
       VITE_API_URL: ${VITE_API_URL:-/api}
-      VITE_DEV_API_PROXY: http://backend:3000
+      VITE_DEV_API_PROXY: http://design-backend:3000
       CHOKIDAR_USEPOLLING: "true"
     volumes:
       - ./frontend:/app
@@ -119,7 +119,7 @@ services:
       - "traefik.http.routers.moebel-design-suite.service=moebel-design-suite"
       - "traefik.http.services.moebel-design-suite.loadbalancer.server.port=5173"
     depends_on:
-      backend:
+      design-backend:
         condition: service_healthy
 
 volumes:

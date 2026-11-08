@@ -28,6 +28,8 @@ export function AddToMoodboardDialog({
 
   useEffect(() => {
     if (!open) return
+    // The dialog lifecycle intentionally resets its request state before fetching external data.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
     setDoneId(null)
     setError(null)
